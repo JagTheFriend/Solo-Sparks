@@ -10,8 +10,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Award, RefreshCw, Sparkles, Target, TrendingUp } from "lucide-react";
-import { useSession } from "next-auth/react";
+import {
+  Award,
+  LogOut,
+  RefreshCw,
+  Sparkles,
+  Target,
+  TrendingUp,
+} from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -165,17 +172,31 @@ export default function Dashboard() {
               Ready to spark some personal growth today?
             </p>
           </div>
-          <Button
-            onClick={handleRefresh}
-            variant="outline"
-            disabled={refreshing}
-            className="flex items-center space-x-2"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-            />
-            <span>Refresh</span>
-          </Button>
+          <div className="flex flex-row gap-2">
+            <Button
+              onClick={handleRefresh}
+              variant="outline"
+              disabled={refreshing}
+              className="flex items-center space-x-2"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+              <span>Refresh</span>
+            </Button>
+            <Button
+              onClick={async () => {
+                await signOut();
+              }}
+              disabled={refreshing}
+              className="flex items-center"
+            >
+              <span>Sign Out</span>
+              <LogOut
+                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
