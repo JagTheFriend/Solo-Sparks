@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Camera, CheckCircle, Mic } from "lucide-react";
+import { Camera, CheckCircle, ImageIcon, X } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
@@ -29,8 +29,14 @@ interface Quest {
   isActive: boolean;
 }
 
+interface SelectedImage {
+  file: File;
+  preview: string;
+  id: string;
+}
+
 interface Reflection {
-  type: "TEXT" | "PHOTO" | "AUDIO";
+  type: "TEXT" | "PHOTO";
   content: string;
   metadata?: any;
 }
@@ -57,12 +63,21 @@ export default function QuestPage({
   const [error, setError] = useState<string | null>(null);
 
   const [textReflection, setTextReflection] = useState("");
-  const [reflections, setReflections] = useState<Reflection[]>([]);
-  const [uploadingFile, setUploadingFile] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   useEffect(() => {
     fetchQuest();
   }, [id]);
+
+  // Cleanup preview URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      selectedImages.forEach((image) => {
+        URL.revokeObjectURL(image.preview);
+      });
+    };
+  }, []);
 
   const fetchQuest = async () => {
     try {
@@ -87,39 +102,88 @@ export default function QuestPage({
     }
   };
 
-  const handleFileUpload = async (file: File, type: "PHOTO" | "AUDIO") => {
-    setUploadingFile(true);
+  const handleImageSelection = (files: FileList | null) => {
+    if (!files) return;
+
+    const newImages: SelectedImage[] = [];
+    const remainingSlots = 5 - selectedImages.length;
+
+    for (let i = 0; i < Math.min(files.length, remainingSlots); i++) {
+      const file = files[i];
+
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        alert(`${file.name} is not an image file`);
+        continue;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        alert(`${file.name} is too large. Maximum size is 10MB`);
+        continue;
+      }
+
+      const preview = URL.createObjectURL(file);
+      newImages.push({
+        file,
+        preview,
+        id: Math.random().toString(36).substr(2, 9),
+      });
+    }
+
+    setSelectedImages((prev) => [...prev, ...newImages]);
+  };
+
+  const removeImage = (imageId: string) => {
+    setSelectedImages((prev) => {
+      const imageToRemove = prev.find((img) => img.id === imageId);
+      if (imageToRemove) {
+        URL.revokeObjectURL(imageToRemove.preview);
+      }
+      return prev.filter((img) => img.id !== imageId);
+    });
+  };
+
+  const uploadImages = async (): Promise<Reflection[]> => {
+    if (selectedImages.length === 0) return [];
+
+    setUploadingImages(true);
+    const uploadedReflections: Reflection[] = [];
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("folder", "quest-reflections");
+      for (const image of selectedImages) {
+        const formData = new FormData();
+        formData.append("file", image.file);
+        formData.append("folder", `user_${session?.user?.id}`);
 
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
 
-      if (response.ok) {
-        const { url } = await response.json();
-
-        const newReflection: Reflection = {
-          type,
-          content: url,
-          metadata: {
-            fileName: file.name,
-            fileSize: file.size,
-            uploadedAt: new Date().toISOString(),
-          },
-        };
-
-        setReflections((prev) => [...prev, newReflection]);
+        if (response.ok) {
+          const { url } = await response.json();
+          uploadedReflections.push({
+            type: "PHOTO",
+            content: url,
+            metadata: {
+              fileName: image.file.name,
+              fileSize: image.file.size,
+              uploadedAt: new Date().toISOString(),
+            },
+          });
+        } else {
+          throw new Error(`Failed to upload ${image.file.name}`);
+        }
       }
     } catch (error) {
-      console.error("File upload error:", error);
+      console.error("Image upload error:", error);
+      throw error;
     } finally {
-      setUploadingFile(false);
+      setUploadingImages(false);
     }
+
+    return uploadedReflections;
   };
 
   const handleCompleteQuest = async () => {
@@ -128,6 +192,9 @@ export default function QuestPage({
     setCompleting(true);
 
     try {
+      // Upload images first
+      const uploadedReflections = await uploadImages();
+
       const response = await fetch(
         `/api/quests/${questData.quest.id}/complete`,
         {
@@ -135,7 +202,7 @@ export default function QuestPage({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             reflection: textReflection,
-            reflections,
+            reflections: uploadedReflections,
           }),
         }
       );
@@ -143,6 +210,11 @@ export default function QuestPage({
       if (response.ok) {
         const data = await response.json();
         setCompleted(true);
+
+        // Clean up preview URLs
+        selectedImages.forEach((image) => {
+          URL.revokeObjectURL(image.preview);
+        });
 
         // Show success message with points earned
         setTimeout(() => {
@@ -156,7 +228,7 @@ export default function QuestPage({
       }
     } catch (error) {
       console.error("Quest completion error:", error);
-      alert("An error occurred. Please try again.");
+      alert("An error occurred while uploading images. Please try again.");
     } finally {
       setCompleting(false);
     }
@@ -211,7 +283,8 @@ export default function QuestPage({
               Quest Completed!
             </h2>
             <p className="text-gray-600 mb-4">
-              Congratulations! You've earned {quest.points} Spark Points.
+              Congratulations! You've earned{" "}
+              {quest.points + selectedImages.length * 5} Spark Points.
             </p>
             {!questData.isCompleted && (
               <p className="text-sm text-gray-500">
@@ -317,20 +390,28 @@ export default function QuestPage({
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-sm">Reward Points</span>
+                    <span className="text-sm">Base Points</span>
                     <span className="font-semibold text-purple-600">
                       {quest.points} SP
                     </span>
                   </div>
+
+                  {selectedImages.length > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Photo Bonus</span>
+                      <span className="font-semibold text-green-600">
+                        +{selectedImages.length * 5} SP
+                      </span>
+                    </div>
+                  )}
 
                   <div className="border-t pt-4">
                     <h4 className="font-semibold mb-2 text-sm">
                       Bonus Opportunities:
                     </h4>
                     <ul className="text-xs text-gray-600 space-y-1">
-                      <li>• Photo reflection: +5 SP</li>
-                      <li>• Audio reflection: +5 SP</li>
-                      <li>• Detailed text: +5 SP</li>
+                      <li>• Each photo: +5 SP (max 5 photos)</li>
+                      <li>• Detailed reflection: +5 SP</li>
                     </ul>
                   </div>
                 </div>
@@ -362,100 +443,92 @@ export default function QuestPage({
               />
             </div>
 
-            {/* Media Uploads */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label className="text-base font-medium mb-2 block">
-                  Photo Reflection (Optional)
-                </Label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+            {/* Photo Upload */}
+            <div>
+              <Label className="text-base font-medium mb-2 block">
+                Photo Reflections (Optional) - {selectedImages.length}/5
+              </Label>
+
+              {selectedImages.length < 5 && (
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center mb-4">
                   <Camera className="h-8 w-8 text-gray-400 mx-auto mb-2" />
                   <p className="text-sm text-gray-600 mb-2">
-                    Capture a moment from your quest
+                    Add up to {5 - selectedImages.length} more photos from your
+                    quest
                   </p>
                   <Input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file, "PHOTO");
-                    }}
+                    multiple
+                    onChange={(e) => handleImageSelection(e.target.files)}
                     className="hidden"
                     id="photo-upload"
                   />
-                  <Label htmlFor="photo-upload" className="cursor-pointer">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={uploadingFile}
-                    >
-                      {uploadingFile ? "Uploading..." : "Choose Photo"}
-                    </Button>
-                  </Label>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-base font-medium mb-2 block">
-                  Audio Reflection (Optional)
-                </Label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                  <Mic className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600 mb-2">
-                    Record your thoughts and feelings
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      document.getElementById("photo-upload")?.click()
+                    }
+                    type="button"
+                  >
+                    Choose Photos
+                  </Button>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Max 10MB per image. Supported formats: JPG, PNG, GIF, WebP
                   </p>
-                  <Input
-                    type="file"
-                    accept="audio/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file, "AUDIO");
-                    }}
-                    className="hidden"
-                    id="audio-upload"
-                  />
-                  <Label htmlFor="audio-upload" className="cursor-pointer">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={uploadingFile}
-                    >
-                      {uploadingFile ? "Uploading..." : "Choose Audio"}
-                    </Button>
-                  </Label>
                 </div>
-              </div>
-            </div>
+              )}
 
-            {/* Uploaded Reflections */}
-            {reflections.length > 0 && (
-              <div>
-                <Label className="text-base font-medium mb-2 block">
-                  Uploaded Reflections
-                </Label>
-                <div className="space-y-2">
-                  {reflections.map((reflection, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center space-x-2 p-2 bg-gray-50 rounded"
-                    >
-                      {reflection.type === "PHOTO" ? (
-                        <Camera className="h-4 w-4 text-blue-500" />
-                      ) : (
-                        <Mic className="h-4 w-4 text-green-500" />
-                      )}
-                      <span className="text-sm">
-                        {reflection.type === "PHOTO" ? "Photo" : "Audio"}{" "}
-                        reflection uploaded
-                      </span>
-                      <Badge variant="secondary" className="text-xs">
-                        +5 SP
-                      </Badge>
+              {/* Image Previews */}
+              {selectedImages.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  {selectedImages.map((image) => (
+                    <div key={image.id} className="relative group">
+                      <div className="aspect-square rounded-lg overflow-hidden bg-gray-100">
+                        <img
+                          src={image.preview || "/placeholder.svg"}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => removeImage(image.id)}
+                        type="button"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                      <div className="absolute bottom-1 left-1 right-1">
+                        <div className="bg-black bg-opacity-50 text-white text-xs px-1 py-0.5 rounded truncate">
+                          {image.file.name}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+
+              {selectedImages.length > 0 && (
+                <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <ImageIcon className="h-4 w-4 text-green-600" />
+                    <span className="text-sm text-green-800">
+                      {selectedImages.length} photo
+                      {selectedImages.length !== 1 ? "s" : ""} selected
+                    </span>
+                    <Badge variant="secondary" className="text-xs">
+                      +{selectedImages.length * 5} SP
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">
+                    Photos will be uploaded when you complete the quest
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Complete Quest Button */}
             <div className="pt-4 border-t">
@@ -468,13 +541,17 @@ export default function QuestPage({
               ) : (
                 <Button
                   onClick={handleCompleteQuest}
-                  disabled={completing}
+                  disabled={completing || uploadingImages}
                   className="w-full"
                   size="lg"
                 >
                   {completing
-                    ? "Completing Quest..."
-                    : "Complete Quest & Earn Points"}
+                    ? uploadingImages
+                      ? "Uploading images..."
+                      : "Completing Quest..."
+                    : `Complete Quest & Earn ${
+                        quest.points + selectedImages.length * 5
+                      } Points`}
                 </Button>
               )}
             </div>

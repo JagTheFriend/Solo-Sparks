@@ -43,14 +43,14 @@ model PersonalityProfile {
 }
 
 model Quest {
-  id           String @id @default(cuid())
+  id           String   @id @default(cuid())
   title        String
   description  String
   category     String
-  difficulty   Int    @default(1) // 1-5 scale
-  points       Int    @default(10)
+  difficulty   Int      @default(1) // 1-5 scale
+  points       Int      @default(10)
   requirements Json // Store requirements as JSON
-  isActive     Boolean @default(true)
+  isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -79,12 +79,12 @@ model UserQuest {
 }
 
 model Reflection {
-  id           String         @id @default(cuid())
-  userQuestId  String
-  type         ReflectionType
-  content      String // For text reflections or file URLs
-  metadata     Json? // Additional metadata like file size, duration, etc.
-  createdAt    DateTime       @default(now())
+  id          String         @id @default(cuid())
+  userQuestId String
+  type        ReflectionType
+  content     String // For text reflections or file URLs
+  metadata    Json? // Additional metadata like file size, duration, etc.
+  createdAt   DateTime       @default(now())
 
   // Relations
   userQuest UserQuest @relation(fields: [userQuestId], references: [id], onDelete: Cascade)
@@ -107,13 +107,13 @@ model SparkPoints {
 }
 
 model Reward {
-  id          String @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   description String
   cost        Int // Points required to redeem
   type        String // "profile_boost", "hidden_content", "exclusive_prompt"
   metadata    Json? // Additional reward data
-  isActive    Boolean @default(true)
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -124,11 +124,11 @@ model Reward {
 }
 
 model UserReward {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
   rewardId   String
-  redeemedAt DateTime @default(now())
-  isUsed     Boolean  @default(false)
+  redeemedAt DateTime  @default(now())
+  isUsed     Boolean   @default(false)
   usedAt     DateTime?
 
   // Relations
@@ -163,5 +163,4 @@ enum QuestStatus {
 enum ReflectionType {
   TEXT
   PHOTO
-  AUDIO
 }
